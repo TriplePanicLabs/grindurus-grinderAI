@@ -1,15 +1,10 @@
 require("dotenv").config();
-const express = require("express");
 const { ethers } = require("ethers");
 const cron = require("node-cron");
-const fs = require("fs");
 
 const intentNFT_ABI = require("../abis/IntentNFT.json")
 const poolsNFT_ABI = require("../abis/PoolsNFT.json")
 const grinderAI_ABI = require("../abis/GrinderAI.json")
-
-const app = express();
-const PORT = process.env.PORT;
 
 const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
 const grinderWallet = new ethers.Wallet(process.env.GRINDER_PRIVATE_KEY, provider);
@@ -122,7 +117,7 @@ async function iterate2(poolIds) {
                 }
             };
         });
-        
+
         const checks = poolIds.map(async (poolId, index) => {
             const positions = decodedPositions[index];
 
