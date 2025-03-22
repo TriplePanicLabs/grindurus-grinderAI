@@ -75,32 +75,6 @@ async function getIntents(intents) {
     return _intents
 }
 
-async function getPositions(poolId) {
-    const positions = await poolsNFT.getPositions(poolId);
-    return {
-        long: {
-            number: Number(positions[0][0]),
-            numberMax: Number(positions[0][1]),
-            priceMin: positions[0][2].toString(),
-            liquidity: positions[0][3].toString(),
-            qty: positions[0][4].toString(),
-            price: positions[0][5].toString(),
-            feeQty: positions[0][6].toString(),
-            feePrice: positions[0][7].toString()
-        },
-        hedge: {
-            number: Number(positions[1][0]),
-            numberMax: Number(positions[1][1]),
-            priceMin: positions[1][2].toString(),
-            liquidity: positions[1][3].toString(),
-            qty: positions[1][4].toString(),
-            price: positions[1][5].toString(),
-            feeQty: positions[1][6].toString(),
-            feePrice: positions[1][7].toString()
-        }
-    };
-}
-
 function verifyTxCost(gasEstimate, gasPrice, ethPrice, maxTxCost) {
     const _gasEstimate = Number(gasEstimate)// [gasEstimate] = gas
     const _gasPrice = Number(gasPrice)      // [gasPrice]=ETH/gas
@@ -119,10 +93,38 @@ async function iterate2(poolIds) {
     try {
         const feeData = await provider.getFeeData();
         const gasPrice = feeData.gasPrice;
-        const positionsArray = await Promise.all(poolIds.map(poolId => getPositions(poolId)));
+        const positionsArray = await poolsNFT.getPositionsBy(poolIds)
 
+        const decodedPositions = positionsArray.map((pair) => {
+            const long = Array.from(pair[0]);
+            const hedge = Array.from(pair[1]);
+        
+            return {
+                long: {
+                    number: Number(long[0]),
+                    numberMax: Number(long[1]),
+                    priceMin: long[2].toString(),
+                    liquidity: long[3].toString(),
+                    qty: long[4].toString(),
+                    price: long[5].toString(),
+                    feeQty: long[6].toString(),
+                    feePrice: long[7].toString()
+                },
+                hedge: {
+                    number: Number(hedge[0]),
+                    numberMax: Number(hedge[1]),
+                    priceMin: hedge[2].toString(),
+                    liquidity: hedge[3].toString(),
+                    qty: hedge[4].toString(),
+                    price: hedge[5].toString(),
+                    feeQty: hedge[6].toString(),
+                    feePrice: hedge[7].toString()
+                }
+            };
+        });
+        
         const checks = poolIds.map(async (poolId, index) => {
-            const positions = positionsArray[index];
+            const positions = decodedPositions[index];
 
             if (positions.long.number === 0) {
                 if (await poolsNFT.grindOp.staticCall(poolId, OP.LONG_BUY)) {
@@ -167,7 +169,7 @@ async function iterate2(poolIds) {
                 }
             }
         });
-
+      
         await Promise.all(checks);
 
         const length = validatedPoolIds.length;
@@ -175,7 +177,7 @@ async function iterate2(poolIds) {
             console.log("validatedPoolIds: ", validatedPoolIds)
             console.log("validatedOps: ", validatedOps)
             const gasEstimate = await grinderAI.batchGrindOp.estimateGas(validatedPoolIds, validatedOps);
-            
+
             if (verifyTxCost(gasEstimate, gasPrice, ethPrice, maxTxCost * length)) {
                 const isBatchValid = await grinderAI.batchGrindOp.staticCall(validatedPoolIds, validatedOps);
             
@@ -208,8 +210,7 @@ async function bruteForceGrind() {
         }
         const intents = await getIntents(intentIds)  // 2. fetch intents from intentsNFT with provided intentsIds
         await Promise.all(intents.map(async (intent) => { // 3. execute iterate2 for all poolIds in intent
-            console.log(intent.poolIds)
-            await iterate2(intent.poolIds);
+            await iterate2([...intent.poolIds]); // 4. call unpacked poolIds
         }));
         intentId = (intentId + intentsPerGrind) % BigInt(totalIntents)
     } catch (error) {
