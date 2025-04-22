@@ -213,17 +213,17 @@ async function bruteForceGrind() {
         const intentIds = Array.from({ length: Number(intentsPerGrind) }, (_, i) => Number((intentId + BigInt(i)) % totalIntents))
         // 2. get intents from intentsNFT with provided intentsIds
         const intents = await getIntents(intentIds)
-        console.log(intents)
+        // console.log(intents)
         // for all intent in intents
         await Promise.all(intents.map(async (intent) => { 
             // 4. get unspent grinds by intentId
             const unspentGrinds = await getUnspentGrinds(intent.intentId) 
-            console.log("unspent grinds: ", unspentGrinds)
+            // console.log("unspent grinds: ", unspentGrinds)
             // 5. verify unspent grinds
             if (verifyUnspentGrinds(unspentGrinds)) {
                 // 6. call unpacked poolIds
                 
-                console.log(intent.poolIds)
+                // console.log(intent.poolIds)
                 await iterate2([...intent.poolIds])
             }
         }))
