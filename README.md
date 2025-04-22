@@ -1,4 +1,4 @@
-# Grindurus Backend
+# Grindurus GrinderAI
 
 This project is a backend service designed to automate operations with Ethereum-based smart contracts. It periodically updates the ETH price and performs operations on contracts using the `ethers` library and `node-cron` for task scheduling.
 
