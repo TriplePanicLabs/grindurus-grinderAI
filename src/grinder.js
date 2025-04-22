@@ -1,29 +1,33 @@
-require("dotenv").config();
-const { ethers } = require("ethers");
-const cron = require("node-cron");
+require("dotenv").config()
+const { ethers } = require("ethers")
+const cron = require("node-cron")
 
-const intentNFT_ABI = require("../abis/IntentNFT.json")
-const poolsNFT_ABI = require("../abis/PoolsNFT.json")
-const grinderAI_ABI = require("../abis/GrinderAI.json")
+const intentsNFT_json = require("../abis/IntentsNFT.json")
+const poolsNFT_json = require("../abis/PoolsNFT.json")
+const grinderAI_json = require("../abis/GrinderAI.json")
 
-const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
-const grinderWallet = new ethers.Wallet(process.env.GRINDER_PRIVATE_KEY, provider);
+const INTENTS_NFT_ADDRESS = "0x924DE1c93A1814B2861E3414e2E2E06e442d493E"
+const POOLS_NFT_ADDRESS = "0xAadF736774b6F592Aa4B8F4B378478F36803A084"
+const GRINDER_AI_ADDRESS = "0x955421703C65fef68704613974F5F064FB89c0B2"
 
-const intentNFT = new ethers.Contract(
-  process.env.INTENT_NFT_ADDRESS,
-  intentNFT_ABI.abi,
-  grinderWallet
-);
+const provider = new ethers.JsonRpcProvider(process.env.RPC_URL)
+const grinderWallet = new ethers.Wallet(process.env.GRINDER_PRIVATE_KEY, provider)
+
+const intentsNFT = new ethers.Contract(
+    INTENTS_NFT_ADDRESS,
+    intentsNFT_json.abi,
+    grinderWallet
+)
 
 const poolsNFT = new ethers.Contract(
-  process.env.POOLS_NFT_ADDRESS,
-  poolsNFT_ABI.abi,
-  grinderWallet
-);
+    POOLS_NFT_ADDRESS,
+    poolsNFT_json.abi,
+    grinderWallet
+)
 
 const grinderAI = new ethers.Contract(
-    process.env.GRINDER_AI_ADDRESS,
-    grinderAI_ABI.abi,
+    GRINDER_AI_ADDRESS,
+    grinderAI_json.abi,
     grinderWallet
 )
 
@@ -40,34 +44,37 @@ let gasMultiplier = {
     denominator: 10n,
 }
 
-let ethPrice; // dinamycally changed via cronjob
-let maxTxCostPercentFromActiveCapital = Number(0.0007) // 0.07% from active capital
+let ethPrice // dinamycally changed via cronjob
 let maxTxCost = Number(0.05)    // 0.05 USD
 
-function loadEthPrice() {
-    getEthPriceFromCoinGecko().then((_ethPrice) => {
-        ethPrice = _ethPrice
-    })
-}
-
 async function getEthPriceFromCoinGecko() {
-    const response = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd");
+    const response = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd")
     if(response.status == 200) {
-        const data = await response.json();
-        return Number(data.ethereum.usd);
+        const data = await response.json()
+        return Number(data.ethereum.usd)
     } else {
-        return Number(2700.0);
+        return Number(2700.0)
     }
 }
 
 async function getTotalIntents() {
-    const totalIntents = await intentNFT.totalIntents()
-    return totalIntents;
+    const totalIntents = await intentsNFT.totalIntents()
+    return BigInt(totalIntents)
 }
 
-async function getIntents(intents) {
-    const _intents = await intentNFT.getIntents(intents)
-    return _intents
+async function getIntents(intentIds) {
+    const intents = await intentsNFT.getIntents(intentIds)
+    return intents.map((intent, index) => ({
+        intentId: intentIds[index],
+        owner: intent.owner,
+        grinds: intent.grinds,
+        poolIds: intent.poolIds,
+    }))
+}
+
+async function getUnspentGrinds(intentId) {
+    const unspentGrinds = await intentsNFT.unspentGrinds(intentId)
+    return BigInt(unspentGrinds)
 }
 
 function verifyTxCost(gasEstimate, gasPrice, ethPrice, maxTxCost) {
@@ -81,18 +88,22 @@ function verifyTxCost(gasEstimate, gasPrice, ethPrice, maxTxCost) {
     return (((_gasEstimate * _gasPrice) / _ethMultiplier) * _ethPrice) < _maxTxCost
 }
 
+function verifyUnspentGrinds(unspentGrinds) {
+    return unspentGrinds > 0n
+}
+
 async function iterate2(poolIds) {
-    let validatedPoolIds = [];
-    let validatedOps = [];
+    let validatedPoolIds = []
+    let validatedOps = []
 
     try {
-        const feeData = await provider.getFeeData();
-        const gasPrice = feeData.gasPrice;
+        const feeData = await provider.getFeeData()
+        const gasPrice = feeData.gasPrice
         const positionsArray = await poolsNFT.getPositionsBy(poolIds)
 
         const decodedPositions = positionsArray.map((pair) => {
-            const long = Array.from(pair[0]);
-            const hedge = Array.from(pair[1]);
+            const long = Array.from(pair[0])
+            const hedge = Array.from(pair[1])
         
             return {
                 long: {
@@ -115,117 +126,120 @@ async function iterate2(poolIds) {
                     feeQty: hedge[6].toString(),
                     feePrice: hedge[7].toString()
                 }
-            };
-        });
+            }
+        })
 
         const checks = poolIds.map(async (poolId, index) => {
-            const positions = decodedPositions[index];
+            const positions = decodedPositions[index]
 
             if (positions.long.number === 0) {
                 if (await poolsNFT.grindOp.staticCall(poolId, OP.LONG_BUY)) {
-                    validatedPoolIds.push(poolId);
-                    validatedOps.push(OP.LONG_BUY);
-                    return;
+                    validatedPoolIds.push(poolId)
+                    validatedOps.push(OP.LONG_BUY)
+                    return
                 }
             } else if (positions.long.number < positions.long.numberMax) {
                 if (await poolsNFT.grindOp.staticCall(poolId, OP.LONG_SELL)) {
-                    validatedPoolIds.push(poolId);
-                    validatedOps.push(OP.LONG_SELL);
-                    return;
+                    validatedPoolIds.push(poolId)
+                    validatedOps.push(OP.LONG_SELL)
+                    return
                 }
                 if (await poolsNFT.grindOp.staticCall(poolId, OP.LONG_BUY)) {
-                    validatedPoolIds.push(poolId);
-                    validatedOps.push(OP.LONG_BUY);
-                    return;
+                    validatedPoolIds.push(poolId)
+                    validatedOps.push(OP.LONG_BUY)
+                    return
                 }
             } else {
                 if (positions.hedge.number === 0) {
                     if (await poolsNFT.grindOp.staticCall(poolId, OP.LONG_SELL)) {
-                        validatedPoolIds.push(poolId);
-                        validatedOps.push(OP.LONG_SELL);
-                        return;
+                        validatedPoolIds.push(poolId)
+                        validatedOps.push(OP.LONG_SELL)
+                        return
                     }
                     if (await poolsNFT.grindOp.staticCall(poolId, OP.HEDGE_SELL)) {
-                        validatedPoolIds.push(poolId);
-                        validatedOps.push(OP.HEDGE_SELL);
-                        return;
+                        validatedPoolIds.push(poolId)
+                        validatedOps.push(OP.HEDGE_SELL)
+                        return
                     }
                 } else {
                     if (await poolsNFT.grindOp.staticCall(poolId, OP.HEDGE_REBUY)) {
-                        validatedPoolIds.push(poolId);
-                        validatedOps.push(OP.HEDGE_REBUY);
-                        return;
+                        validatedPoolIds.push(poolId)
+                        validatedOps.push(OP.HEDGE_REBUY)
+                        return
                     }
                     if (await poolsNFT.grindOp.staticCall(poolId, OP.HEDGE_SELL)) {
-                        validatedPoolIds.push(poolId);
-                        validatedOps.push(OP.HEDGE_SELL);
-                        return;
+                        validatedPoolIds.push(poolId)
+                        validatedOps.push(OP.HEDGE_SELL)
+                        return
                     }
                 }
             }
-        });
+        })
       
-        await Promise.all(checks);
+        await Promise.all(checks)
 
-        const length = validatedPoolIds.length;
+        const length = validatedPoolIds.length
         if (length > 0) {
             console.log("validatedPoolIds: ", validatedPoolIds)
             console.log("validatedOps: ", validatedOps)
-            const gasEstimate = await grinderAI.batchGrindOp.estimateGas(validatedPoolIds, validatedOps);
+            const gasEstimate = await grinderAI.batchGrindOp.estimateGas(validatedPoolIds, validatedOps)
 
             if (verifyTxCost(gasEstimate, gasPrice, ethPrice, maxTxCost * length)) {
-                const isBatchValid = await grinderAI.batchGrindOp.staticCall(validatedPoolIds, validatedOps);
+                const isBatchValid = await grinderAI.batchGrindOp.staticCall(validatedPoolIds, validatedOps)
             
                 if (isBatchValid) {
-                    const gasLimit = gasEstimate * gasMultiplier.numerator / gasMultiplier.denominator;
+                    const gasLimit = gasEstimate * gasMultiplier.numerator / gasMultiplier.denominator
 
-                    const tx = await grinderAI.batchGrindOp(validatedPoolIds, validatedOps, { gasLimit });
-                    console.log("Transaction Hash:", tx.hash);
+                    const tx = await grinderAI.batchGrindOp(validatedPoolIds, validatedOps, { gasLimit })
+                    console.log("Transaction Hash:", tx.hash)
                 } else {
-                    console.warn("BatchGrindOp reverted");
+                    console.warn("BatchGrindOp reverted")
                 }
             }
         }
     } catch (error) {
-        console.error("Error iterate2:", error);
+        console.error("Error iterate2:", error)
     }
 }
 
-let totalIntents = 1n;
-let intentId = 0n;
-let intentsPerGrind = 1n;
+let intentId = 0n
+let intentsPerGrind = 1n
 
 async function bruteForceGrind() {
     try {
         // 0. fetch totalIntents in cron job
-        let intentIds = []; // 1. form array of intents
-        for (let i = 0n; i < intentsPerGrind; i++) {
-            let nextIntentId = Number((intentId + i) % totalIntents);
-            intentIds.push(nextIntentId);
-        }
-        const intents = await getIntents(intentIds)  // 2. fetch intents from intentsNFT with provided intentsIds
-        await Promise.all(intents.map(async (intent) => { // 3. execute iterate2 for all poolIds in intent
-            await iterate2([...intent.poolIds]); // 4. call unpacked poolIds
-        }));
-        intentId = (intentId + intentsPerGrind) % BigInt(totalIntents)
+        let totalIntents = await getTotalIntents()
+        // 1. form intents id
+        const intentIds = Array.from({ length: Number(intentsPerGrind) }, (_, i) => Number((intentId + BigInt(i)) % totalIntents))
+        // 2. get intents from intentsNFT with provided intentsIds
+        const intents = await getIntents(intentIds)
+        console.log(intents)
+        // for all intent in intents
+        await Promise.all(intents.map(async (intent) => { 
+            // 4. get unspent grinds by intentId
+            const unspentGrinds = await getUnspentGrinds(intent.intentId) 
+            console.log("unspent grinds: ", unspentGrinds)
+            // 5. verify unspent grinds
+            if (verifyUnspentGrinds(unspentGrinds)) {
+                // 6. call unpacked poolIds
+                
+                console.log(intent.poolIds)
+                await iterate2([...intent.poolIds])
+            }
+        }))
+        intentId = (intentId + intentsPerGrind) % totalIntents
     } catch (error) {
-        console.error("Error in iterateNextAccount:", error);
+        console.error("Error in iterateNextAccount:", error)
     }
 }
 
 /// every minute make grind
 cron.schedule("* * * * *", async () => {
-    console.log(`[${new Date().toISOString()}] Running grind`);
-    await bruteForceGrind();
-});
-
-/// every minute 
-cron.schedule("* * * * *", async () => {
-    totalIntents = BigInt(await getTotalIntents())
-    console.log(`[${new Date().toISOString()}] Get total intents ${totalIntents}`);
-});
+    console.log(`[${new Date().toISOString()}] Running grind`)
+    await bruteForceGrind()
+})
 
 /// every minute updates ETH price
 cron.schedule("* * * * *", async () => {
     ethPrice = await getEthPriceFromCoinGecko()
-});
+})
