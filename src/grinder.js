@@ -6,9 +6,9 @@ const intentsNFT_json = require("../abis/IntentsNFT.json")
 const poolsNFT_json = require("../abis/PoolsNFT.json")
 const grinderAI_json = require("../abis/GrinderAI.json")
 
-const INTENTS_NFT_ADDRESS = "0x924DE1c93A1814B2861E3414e2E2E06e442d493E"
-const POOLS_NFT_ADDRESS = "0xAadF736774b6F592Aa4B8F4B378478F36803A084"
-const GRINDER_AI_ADDRESS = "0x955421703C65fef68704613974F5F064FB89c0B2"
+const INTENTS_NFT_ADDRESS = "0x03afbDE12f4E57dbe551a2b8D7BA0F91239207Af"
+const POOLS_NFT_ADDRESS = "0x5B42518423A7CB79A21AF455441831F36FDe823C"
+const GRINDER_AI_ADDRESS = "0xf114dEfcAce38689E98A1949DB9b162208810204"
 
 const provider = new ethers.JsonRpcProvider(process.env.RPC_URL)
 const grinderWallet = new ethers.Wallet(process.env.GRINDER_PRIVATE_KEY, provider)
@@ -68,13 +68,10 @@ async function getIntents(intentIds) {
         intentId: intentIds[index],
         owner: intent.owner,
         grinds: intent.grinds,
+        spentGrinds: intent.spentGrinds,
+        unspentGrinds: intent.unspentGrinds,
         poolIds: intent.poolIds,
     }))
-}
-
-async function getUnspentGrinds(intentId) {
-    const unspentGrinds = await intentsNFT.unspentGrinds(intentId)
-    return BigInt(unspentGrinds)
 }
 
 function verifyTxCost(gasEstimate, gasPrice, ethPrice, maxTxCost) {
@@ -88,8 +85,8 @@ function verifyTxCost(gasEstimate, gasPrice, ethPrice, maxTxCost) {
     return (((_gasEstimate * _gasPrice) / _ethMultiplier) * _ethPrice) < _maxTxCost
 }
 
-function verifyUnspentGrinds(unspentGrinds) {
-    return unspentGrinds > 0n
+function verifyUnspentGrinds(intent) {
+    return intent.unspentGrinds > 0n
 }
 
 async function iterate2(poolIds) {
@@ -213,17 +210,12 @@ async function bruteForceGrind() {
         const intentIds = Array.from({ length: Number(intentsPerGrind) }, (_, i) => Number((intentId + BigInt(i)) % totalIntents))
         // 2. get intents from intentsNFT with provided intentsIds
         const intents = await getIntents(intentIds)
-        // console.log(intents)
         // for all intent in intents
         await Promise.all(intents.map(async (intent) => { 
-            // 4. get unspent grinds by intentId
-            const unspentGrinds = await getUnspentGrinds(intent.intentId) 
-            // console.log("unspent grinds: ", unspentGrinds)
-            // 5. verify unspent grinds
-            if (verifyUnspentGrinds(unspentGrinds)) {
-                // 6. call unpacked poolIds
+            // 3. verify unspent grinds
+            if (verifyUnspentGrinds(intent)) {
+                // 4. call unpacked poolIds
                 
-                // console.log(intent.poolIds)
                 await iterate2([...intent.poolIds])
             }
         }))
